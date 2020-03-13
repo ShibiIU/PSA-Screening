@@ -1,0 +1,203 @@
+---
+title: "PSA Screening and Prostate Cancer Diagnosis"
+author: "Shibi He"
+date: "December 15, 2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(alr4)
+```
+
+
+Load Data:
+```{r}
+prostate = read.table("f19s631e3.txt")
+```
+
+
+### 1.a. Transformation
+
+#### Check the scatter plot 
+```{r}
+scatterplotMatrix(~PSA+SVI+cancer_volume+capsular_penetration+
+                   prostate_weight+BPH+GS+pct_G+age,
+                  smooth=F, 
+                  diagonal=F,
+                  regL=F,
+                  data = prostate)
+
+```
+
+
+The scatter plots show that many data points concentrate at the lower left part of the graph and the relationship between PSA and other variables does not seem to be linear.
+Transformation may be needed. 
+
+
+
+```{r}
+# Transform the predictors
+prostate$pct_G=prostate$pct_G+0.01
+
+bc1 = powerTransform(cbind(cancer_volume,capsular_penetration,
+                   prostate_weight, BPH, pct_G,age) ~ 1, prostate)
+summary(bc1)
+
+
+testTransform(bc1, c(0,-0.5,0,0,0,2))
+```
+
+
+The suggested transformation is to log transform "cancer_volume", "prostage_weight", "BPH","pct_G", square transformation for "age", and -0.5 power transformation for "capsular_penetration". 
+
+```{r}
+# Transform response
+m0 = lm(PSA ~ SVI + log(cancer_volume)+ I(capsular_penetration^(-0.5))+log(prostate_weight)+log(BPH)+GS+log(pct_G)+I(age^2), data=prostate)
+
+summary(powerTransform(m0))
+```
+
+The LR test show we should also take log transfomation for the response. So the candidate model is as follows: 
+
+```{r}
+model1 = lm(log(PSA)~SVI + log(cancer_volume)+ I(capsular_penetration^(-0.5))+log(prostate_weight)+log(BPH)+GS+log(pct_G)+I(age^2), data=prostate)
+
+summary(model1)
+```
+
+
+#### Check the scatter plots after transformation
+```{r}
+scatterplotMatrix(~log(PSA)+SVI+log(cancer_volume)+I(capsular_penetration^(-0.5))+
+                   log(prostate_weight)+log(BPH)+GS+log(pct_G)+I(age^2),
+                  smooth=F, 
+                  diagonal=F,
+                  regL=F,
+                  data = prostate)
+```
+
+
+After transformation, the relationship seems to be more linear. So the candidate model1 is as follows: log(PSA) ~ SVI + log(cancer_volume)+ I(capsular_penetration^(-0.5)) +log(prostate_weight)+log(BPH)+GS+log(pct_G)+I(age^2).
+
+
+### 1b. Model selection
+```{r}
+# Backward Elimination
+
+m.bck = step(model1, scope = ~ 1, direction = "backward")
+
+#m.bck$anova
+model2 = lm(log(PSA) ~ SVI + log(cancer_volume) + log(prostate_weight) + 
+    log(BPH) + GS + log(pct_G) + I(age^2), data = prostate)
+summary(model2)
+```
+
+
+```{r}
+# Bidirectional stepwise method
+
+m0 = lm(log(PSA) ~ 1, data=prostate) 
+m.bi = step(m0, 
+            scope=list(lower=m0, upper=model1), 
+            direction = "both", trace=FALSE)
+m.bi$anova
+```
+
+
+
+Both backward elimination and bidirectional stepwise method suggest to drop the regressor "capsular_penetration". Therefore, I consider the following model2:
+log(PSA) ~ SVI + log(cancer_volume) + log(prostate_weight) + 
+    log(BPH) + GS + log(pct_G) + I(age^2).
+    
+The F-test gives an extremely small p-value, suggesting the overall model is significant. Moreover, the Adjusted R-squared is 0.6646, suggesting 66.5% of the variation in PSA can be explained by this model. Therefoer, I would say this model did a good job predicting. 
+
+
+
+
+### 1c. Check if model2 violates the assumptions of the model
+```{r}
+residualPlots(model2)
+```
+
+The residual plots (except for prostate_weight and age) look like null plots and do not have any visual evidence for curvature. Moreover, the Tukey test gives a p-value of 0.2, providing no evidence against the mean function. 
+
+
+
+```{r}
+ncvTest(model2)
+```
+
+The test for non-constant variance gives a p-value of 0.92, suggesting the model satisfies the constant variance assumption.
+
+```{r}
+plot(model2)
+```
+
+
+The QQplot of residuals suggest the normality assumption has been satisfied.
+
+### Check for multicolinearity
+```{r}
+vif(model2)
+
+```
+
+All the VIF are small, suggesting no multicolinearity problem in our model.
+
+
+
+### 3. Influence analysis
+
+
+
+#### Check for outliers
+```{r}
+outlierTest(model2)
+```
+
+
+No Studentized residuals with Bonferroni p < 0.05, suggesting there is no outliers in the data. 
+
+
+
+####  Check for influential observations
+```{r}
+CookDist = cooks.distance(model2)
+X=sort(CookDist)
+X
+
+influenceIndexPlot(model2)
+```
+
+
+
+Observation 52 and 108 have the largest Cook's distance, so they are the relatively more influential observations. Next, I remove these two influential observations and fit the model2 again to see if they have large impact on the estimated coefficients.
+
+```{r}
+prostate2 = prostate[c(-52, -108),]
+
+model3 = lm(log(PSA) ~ SVI + log(cancer_volume) + log(prostate_weight) + 
+    log(BPH) + GS + log(pct_G) + I(age^2), data = prostate2)
+summary(model3)
+```
+
+After removing the two influential observations, I found the effect of "BPH" became significant, and the effect of "prostate_weight" becomes less significant. Therefore, when we interpret the results of model2, we should be very cautious as the results we see can be largely attributed to the two influential observations.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
